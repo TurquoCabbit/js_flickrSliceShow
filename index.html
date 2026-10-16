@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#070c14" />
+  <title>flickrSliceShow</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100dvh; color: #edf2fb; background: #070c14; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    a { color: #aed3ff; }
+    .app { min-height: 100dvh; display: flex; flex-direction: column; }
+    .toolbar { position: relative; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+      padding: 16px clamp(18px, 3vw, 40px); background: #101824; border-bottom: 1px solid #253142; }
+    .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; white-space: nowrap; }
+    .mark { display: flex; gap: 4px; }
+    .mark span { width: 11px; height: 11px; border-radius: 50%; background: #f58fc8; }
+    .mark span:first-child { background: #51a9ff; }
+    .brand strong { font-size: 15px; letter-spacing: .02em; }
+    .brand small { display: block; color: #8da0b8; font-size: 11px; margin-top: 2px; }
+    .form { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; flex: 1 1 570px; justify-content: flex-end; }
+    .control { display: inline-flex; align-items: center; gap: 9px; color: #a9b8c9; font-size: 12px; white-space: nowrap; }
+    .input, .select { background: #0a101a; color: #eaf0fa; border: 1px solid #344156; border-radius: 9px; outline: none;
+      height: 39px; padding: 0 12px; transition: border-color .2s; }
+    .input:focus, .select:focus { border-color: #6aaeff; }
+    .input { width: min(270px, 56vw); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; }
+    .input.key { width: 185px; }
+    .input.interval-input { width: 110px; flex: 0 0 110px; }
+    .brand a { font-size: 11px; text-decoration: none; display: inline-block; margin-top: 4px; }
+    .brand a:hover { text-decoration: underline; }
+    .load-progress { flex: 1 1 100%; height: 4px; border: 0; appearance: none; accent-color: #65a9ff; }
+    .load-progress::-webkit-progress-bar { background: #253247; border-radius: 10px; }
+    .load-progress::-webkit-progress-value { background: #64aaff; border-radius: 10px; }
+    .load-progress::-moz-progress-bar { background: #64aaff; border-radius: 10px; }
+    .api-notice { font-size: 10px; opacity: .72; text-align: right; }
+
+    .select { min-width: 83px; }
+    .btn { min-height: 39px; padding: 0 14px; border: 1px solid #334259; border-radius: 9px; background: #192638;
+      color: #ecf4ff; transition: background .15s, border-color .15s; }
+    .btn:hover:not(:disabled) { background: #273a50; border-color: #597ba5; }
+    .btn.primary { background: #357cdd; border-color: #458cef; color: white; font-weight: 600; }
+    .btn.primary:hover:not(:disabled) { background: #4b91ee; }
+    .stage { position: relative; flex: 1 1 auto; min-height: 460px; overflow: hidden; background: radial-gradient(circle at 50% 40%, #172439, #070c14 72%); }
+    .slide { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain;
+      opacity: 0; transition: opacity 950ms ease-in-out; }
+    .slide.active { opacity: 1; }
+    .stage::after { content: ""; position: absolute; inset: 55% 0 0; pointer-events: none;
+      background: linear-gradient(to bottom, transparent, rgba(2, 6, 12, .83)); }
+    .empty { position: absolute; z-index: 1; inset: 0; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center; padding: 24px; pointer-events: none; }
+    .empty.hidden { display: none; }
+    .empty .glyph { font-size: 56px; line-height: 1; margin-bottom: 22px; opacity: .8; }
+    .empty h1 { font-size: clamp(20px, 3vw, 31px); font-weight: 640; margin: 0 0 12px; }
+    .empty p { color: #9aaabd; max-width: 540px; line-height: 1.75; margin: 0; }
+    .overlay { position: absolute; z-index: 2; left: clamp(20px, 3vw, 44px); right: clamp(20px, 3vw, 44px);
+      bottom: clamp(20px, 3vw, 38px); display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+    .photo-info { min-width: 0; max-width: min(760px, 65vw); }
+    .eyebrow { color: #c5d1e0; opacity: .85; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    .photo-title { display: block; color: #fff; margin: 8px 0 6px; text-decoration: none; font-size: clamp(17px, 2.4vw, 27px);
+      line-height: 1.25; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .photo-title:hover { text-decoration: underline; }
+    .photographer { color: #aab9cc; font-size: 12px; }
+    .playback { display: flex; align-items: center; gap: 8px; }
+    .round-btn { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 100px;
+      color: white; background: rgba(24, 34, 49, .86); border: 1px solid rgba(190, 215, 245, .25); backdrop-filter: blur(10px); }
+    .round-btn:hover:not(:disabled) { background: #304a6d; }
+    .round-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2;
+      stroke-linecap: round; stroke-linejoin: round; }
+    .round-btn.play { width: 49px; height: 49px; background: rgba(50, 123, 218, .97); border-color: rgba(100, 170, 255, .6); }
+    .statusbar { padding: 10px clamp(18px, 3vw, 40px); display: flex; justify-content: space-between; align-items: center;
+      gap: 12px; color: #9baac0; font-size: 12px; background: #0c131d; border-top: 1px solid #202e3d; }
+    .status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status.error { color: #ffabac; }
+    .help { white-space: nowrap; opacity: .8; }
+    .hidden { display: none !important; }
+    @media (max-width: 780px) {
+      .brand { width: 100%; margin-right: 0; }
+      .form { justify-content: flex-start; flex-basis: 100%; }
+      .input { width: min(100%, 420px); flex: 1; }
+      .input.key { width: min(100%, 280px); }
+      .api-notice { display: none; }
+      .stage { min-height: 58dvh; }
+      .overlay { bottom: 22px; align-items: end; }
+      .photo-info { max-width: 55%; }
+      .help { display: none; }
+      .round-btn { width: 38px; height: 38px; }
+      .round-btn.play { width: 44px; height: 44px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .slide { transition-duration: 100ms; } }
+
+    /* Fullscreen the photo stage ONLY: no toolbar, footer, browser chrome or margins. */
+    .stage:fullscreen {
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      min-height: 0;
+      max-height: none;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: #000;
+    }
+    /* Fullscreen starts by showing the entire photo; C switches to a cropped fill. */
+    .stage:fullscreen .slide { object-fit: contain; }
+    .stage:fullscreen.fill-cover .slide { object-fit: cover; }
+
+    /* Hide captions, buttons, gradient and mouse cursor during unattended playback. */
+    .stage:fullscreen .overlay {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity .24s ease, visibility .24s ease;
+    }
+    .stage:fullscreen.controls-visible .overlay {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+    }
+    .stage:fullscreen::after { opacity: 0; transition: opacity .24s ease; }
+    .stage:fullscreen.controls-visible::after { opacity: 1; }
+    .stage:fullscreen:not(.controls-visible) { cursor: none; }
+    .fit-btn { display: none; }
+    .stage:fullscreen .fit-btn { display: grid; }
+    @media (prefers-reduced-motion: reduce) {
+      .stage:fullscreen .overlay, .stage:fullscreen::after { transition-duration: 0ms; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" id="app">
+    <header class="toolbar">
+      <div class="brand">
+        <span class="mark" aria-hidden="true"><span></span><span></span></span>
+        <div>
+          <strong>flickrSliceShow</strong>
+          <small>全部公開歷史照片 · 洗牌後逐張播放</small>
+          <a href="https://www.flickr.com/services/apps/create/apply/" target="_blank" rel="noopener noreferrer">取得 Flickr API Key ↗</a>
+        </div>
+      </div>
+      <form class="form" id="loadForm">
+        <label class="control" for="apiKey">API Key</label>
+        <input class="input key" type="password" id="apiKey" placeholder="輸入 Flickr API Key" autocomplete="off" spellcheck="false" required />
+        <label class="control" for="userId">Flickr 帳號</label>
+        <input class="input" id="userId" placeholder="User ID / 個人頁網址 / 自訂網址名稱" autocomplete="off" spellcheck="false" required />
+        <button class="btn primary" id="loadBtn" type="submit">載入完整相簿</button>
+        <label class="control" for="interval">切換間隔</label>
+        <select class="select" id="interval" aria-label="每張照片顯示秒數">
+          <option value="5">5 秒</option>
+          <option value="10" selected>10 秒</option>
+          <option value="30">30 秒</option>
+          <option value="60">60 秒</option>
+          <option value="custom">自訂…</option>
+        </select>
+        <label class="control hidden" id="customIntervalLabel" for="customInterval">自訂秒數</label>
+        <input class="input interval-input hidden" type="number" id="customInterval" min="1" max="86400" step="1" value="30" aria-label="自訂每張照片顯示秒數（1 到 86400 秒）" title="請輸入 1 到 86400 秒（上限 1 天）" disabled required />
+      </form>
+    </header>
+
+    <section class="stage" id="stage" tabindex="-1" aria-label="Flickr 照片輪播">
+      <img class="slide" id="slideA" alt="" />
+      <img class="slide" id="slideB" alt="" />
+      <div class="empty" id="empty">
+        <span class="glyph" aria-hidden="true">✦</span>
+        <h1 id="emptyTitle">讓照片隨機播放</h1>
+        <p id="emptyText">輸入 Flickr API Key 與帳號，即可讀取所有公開歷史照片，建立完整的隨機播放清單。<br />也可以貼上 Flickr 個人頁網址。</p>
+      </div>
+      <div class="overlay">
+        <div class="photo-info hidden" id="photoInfo">
+          <span class="eyebrow" id="counter">Flickr Photo</span>
+          <a class="photo-title" id="photoLink" target="_blank" rel="noopener noreferrer">—</a>
+          <span class="photographer" id="author">—</span>
+        </div>
+        <nav class="playback" aria-label="輪播控制">
+          <button type="button" class="round-btn" id="prevBtn" title="上一張 (←)" aria-label="上一張" disabled>
+            <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg>
+          </button>
+          <button type="button" class="round-btn play" id="playBtn" title="暫停 / 播放 (空白鍵)" aria-label="暫停或播放" disabled>
+            <svg id="pauseIcon" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" /></svg>
+            <svg id="playIcon" class="hidden" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z" /></svg>
+          </button>
+          <button type="button" class="round-btn" id="nextBtn" title="下一張 (→)" aria-label="下一張" disabled>
+            <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></svg>
+          </button>
+          <button type="button" class="round-btn fit-btn" id="fitBtn" title="完整顯示：保留整張照片 (C)" aria-label="改為填滿畫面" aria-pressed="false">
+            <svg viewBox="0 0 24 24"><path d="M3 9V3h6m6 0h6v6M21 15v6h-6M9 21H3v-6" /></svg>
+          </button>
+          <button type="button" class="round-btn" id="fullscreenBtn" title="進入真正全螢幕 (F)" aria-label="進入全螢幕">
+            <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3" /></svg>
+          </button>
+        </nav>
+      </div>
+    </section>
+    <footer class="statusbar">
+      <span class="status" id="status" role="status" aria-live="polite">尚未載入照片 · 僅支援公開照片</span>
+      <span class="api-notice">This product uses the Flickr API but is not endorsed or certified by SmugMug, Inc.</span>
+      <span class="help">← → 換圖　Space 暫停　F 全螢幕　C 填滿畫面／完整顯示</span>
+      <progress class="load-progress hidden" id="progress" max="100" value="0" aria-label="照片清單載入進度"></progress>
+    </footer>
+  </main>
+
+  <script>
+    "use strict";
+
+    // 也可直接填入固定的 API Key / 帳號，開啟網頁即開始輪播。
+    // 提醒：純前端程式無法隱藏 API Key。切勿在此填入 API Secret 或 OAuth Token。
+    const DEFAULT_FLICKR_API_KEY = "";
+    const DEFAULT_FLICKR_USER_ID = "";
+    const PAGE_SIZE = 500;              // Flickr getPublicPhotos 每次最多 500 張
+    const PARALLEL_REQUESTS = 3;        // 限制同時請求的頁數
+    const REFRESH_EVERY_MS = 6 * 60 * 60 * 1000; // 每六小時更新整份清單
+    const REQUEST_TIMEOUT_MS = 20000;
+
+    const $ = (id) => document.getElementById(id);
+    const slides = [$('slideA'), $('slideB')];
+    const state = {
+      userId: '', apiKey: '', photos: [], bag: [], history: [], historyAt: -1,
+      currentIndex: -1, activeSlide: 1, playing: true, timer: null,
+      imageToken: 0, loading: false, loadToken: 0, firstLoadCompleted: false
+    };
+    let callbackCounter = 0;
+
+    function setStatus(message, isError = false) {
+      $('status').textContent = message;
+      $('status').classList.toggle('error', isError);
+    }
+
+    function showEmpty(title, text) {
+      $('emptyTitle').textContent = title;
+      $('emptyText').textContent = text;
+      $('empty').classList.remove('hidden');
+    }
+
+    function showProgress(done, total) {
+      const bar = $('progress');
+      bar.classList.remove('hidden');
+      bar.max = Math.max(total, 1);
+      bar.value = done;
+    }
+
+    function hideProgress() {
+      $('progress').classList.add('hidden');
+    }
+
+    // JSONP 使用 Flickr 官方 API 網域，可從 file:// 的單檔 HTML 開啟。
+    // JSONP 會執行 Flickr 返回的 JS，因此請求目標固定為 HTTPS API 官方網址。
+    function flickrRequest(apiKey, method, args = {}) {
+      return new Promise((resolve, reject) => {
+        const callback = '__flickr_history_cb_' + (++callbackCounter);
+        const script = document.createElement('script');
+        let finished = false;
+        const timeout = setTimeout(() => finish(new Error('Flickr API 請求逾時。')), REQUEST_TIMEOUT_MS);
+
+        function finish(err, result) {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timeout);
+          script.remove();
+          delete window[callback];
+          if (err) reject(err);
+          else if (!result || result.stat !== 'ok') {
+            reject(new Error(`Flickr API 錯誤 ${result?.code ?? ''}：${result?.message || '未知錯誤'}`));
+          } else resolve(result);
+        }
+
+        window[callback] = (result) => finish(null, result);
+        script.onerror = () => finish(new Error('無法連接 Flickr API，請檢查網路連線或瀏覽器限制。'));
+        script.src = 'https://api.flickr.com/services/rest/?' + new URLSearchParams({
+          method, api_key: apiKey, format: 'json', jsoncallback: callback, ...args
+        }).toString();
+        document.head.appendChild(script);
+      });
+    }
+
+    async function flickrRequestWithRetry(apiKey, method, args) {
+      let error;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { return await flickrRequest(apiKey, method, args); }
+        catch (err) {
+          error = err;
+          // 金鑰錯誤、帳號無效等不要重試；連線失敗、服務暫不可用則重試。
+          if (/API 錯誤 (1|2|100|111|112|114|115|116)\b/.test(err.message)) break;
+          if (attempt < 2) await new Promise(r => setTimeout(r, 700 * (attempt + 1)));
+        }
+      }
+      throw error;
+    }
+
+    function resolveAccountInput(raw) {
+      const text = String(raw || '').trim();
+      const match = text.match(/\b\d+@N\d+\b/i);
+      if (match) return { id: match[0].replace(/@n/i, '@N') };
+      if (!text) throw new Error('請輸入 Flickr 帳號。');
+      if (/^https?:\/\//i.test(text)) {
+        let url;
+        try { url = new URL(text); } catch { throw new Error('帳號網址無效。'); }
+        if (!(url.hostname === 'flickr.com' || url.hostname.endsWith('.flickr.com')) ||
+            !/^\/(photos|people)\/[^/]+/i.test(url.pathname)) {
+          throw new Error('請貼上 flickr.com/photos/帳號 的個人頁網址。');
+        }
+        return { url: url.origin + url.pathname };
+      }
+      if (/^[\w-]{1,100}$/.test(text)) {
+        return { url: 'https://www.flickr.com/photos/' + encodeURIComponent(text) + '/' };
+      }
+      throw new Error('請使用 Flickr NSID、個人頁網址或自訂網址名稱。');
+    }
+
+    async function lookupUserId(apiKey, raw) {
+      const account = resolveAccountInput(raw);
+      if (account.id) return account.id;
+      const result = await flickrRequestWithRetry(apiKey, 'flickr.urls.lookupUser', { url: account.url });
+      if (!result.user?.id) throw new Error('無法從網址取得 Flickr User ID。');
+      return String(result.user.id);
+    }
+
+    function validImageUrl(src) {
+      try {
+        const u = new URL(src);
+        return u.protocol === 'https:' &&
+          (u.hostname === 'staticflickr.com' || u.hostname.endsWith('.staticflickr.com'));
+      } catch { return false; }
+    }
+
+    function convertPhoto(photo, userId) {
+      if (!photo || !/^\d+$/.test(String(photo.id || '')) || photo.media === 'video') return null;
+      if (String(photo.ispublic) === '0') return null;
+      const urls = [photo.url_l, photo.url_c, photo.url_z, photo.url_m];
+      const server = String(photo.server || '');
+      const secret = String(photo.secret || '');
+      if (/^[a-zA-Z0-9]+$/.test(server) && /^[a-zA-Z0-9]+$/.test(secret)) {
+        // 當 extras 的網址不存在時，使用 Flickr 公開圖片網址的官方格式。
+        urls.push(`https://live.staticflickr.com/${server}/${photo.id}_${secret}_b.jpg`);
+        urls.push(`https://live.staticflickr.com/${server}/${photo.id}_${secret}_z.jpg`);
+      }
+      const srcs = [...new Set(urls.filter(validImageUrl))];
+      if (!srcs.length) return null;
+      const owner = String(photo.owner || userId);
+      return {
+        id: String(photo.id),
+        title: String(photo.title || '').trim() || '未命名照片',
+        author: String(photo.ownername || 'Flickr 使用者'),
+        link: 'https://www.flickr.com/photos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(photo.id) + '/',
+        srcs
+      };
+    }
+
+    // 取得完整照片清單，使用有限併發與進度顯示；不是只讀取第一頁。
+    async function fetchEntirePhotoLibrary(apiKey, userId, onProgress) {
+      const common = {
+        user_id: userId, per_page: String(PAGE_SIZE),
+        extras: 'url_l,url_c,url_z,url_m,media,owner_name',
+        safe_search: '1'
+      };
+      const first = await flickrRequestWithRetry(apiKey, 'flickr.people.getPublicPhotos', {
+        ...common, page: '1'
+      });
+      const firstList = first.photos?.photo;
+      const pages = Number(first.photos?.pages ?? 0);
+      if (!Array.isArray(firstList) || !Number.isSafeInteger(pages) || pages < 0) {
+        throw new Error('Flickr 回傳的照片清單格式不正確。');
+      }
+      if (pages === 0 || !firstList.length) throw new Error('此帳號沒有可讀取的公開照片。');
+      if (pages > 2000) throw new Error('此帳號照片頁數非常大，請改用具快取的後端方案。');
+      const pageData = new Array(pages);
+      pageData[0] = firstList;
+      let completed = 1;
+      let nextPage = 2;
+      onProgress(completed, pages, Number(first.photos.total) || 0);
+
+      async function worker() {
+        while (nextPage <= pages) {
+          const page = nextPage++;
+          const data = await flickrRequestWithRetry(apiKey, 'flickr.people.getPublicPhotos', {
+            ...common, page: String(page)
+          });
+          if (!Array.isArray(data.photos?.photo)) throw new Error('第 ' + page + ' 頁照片格式不正確。');
+          pageData[page - 1] = data.photos.photo;
+          completed++;
+          onProgress(completed, pages, Number(first.photos.total) || 0);
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(PARALLEL_REQUESTS, pages - 1) }, worker));
+
+      const ids = new Set();
+      const photos = [];
+      for (const batch of pageData) {
+        for (const item of batch) {
+          const photo = convertPhoto(item, userId);
+          if (photo && !ids.has(photo.id)) {
+            ids.add(photo.id);
+            photos.push(photo);
+          }
+        }
+      }
+      if (!photos.length) throw new Error('找到了照片資料，但沒有可顯示的公開圖片。');
+      return { photos, remoteTotal: Number(first.photos.total) || photos.length };
+    }
+
+    function shuffleIndices(length, avoidFirstIndex = -1) {
+      const order = Array.from({ length }, (_, i) => i);
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [order[i], order[j]] = [order[j], order[i]];
+      }
+      // 因為每次用 pop() 取下一張，最後一格會先播。
+      if (order.length > 1 && order[order.length - 1] === avoidFirstIndex) {
+        [order[0], order[order.length - 1]] = [order[order.length - 1], order[0]];
+      }
+      return order;
+    }
+
+    function resetDeck(photos, keepId = null) {
+      state.photos = photos;
+      state.currentIndex = keepId ? photos.findIndex(p => p.id === keepId) : -1;
+      state.history = state.currentIndex >= 0 ? [state.currentIndex] : [];
+      state.historyAt = state.history.length - 1;
+      state.bag = shuffleIndices(photos.length, state.currentIndex);
+      if (state.currentIndex >= 0) state.bag = state.bag.filter(i => i !== state.currentIndex);
+    }
+
+    function nextIndex() {
+      if (state.historyAt < state.history.length - 1) return state.history[++state.historyAt];
+      if (!state.bag.length) state.bag = shuffleIndices(state.photos.length, state.currentIndex);
+      const index = state.bag.pop();
+      state.history.push(index);
+      state.historyAt = state.history.length - 1;
+      if (state.history.length > 500) {
+        state.history.shift();
+        state.historyAt--;
+      }
+      return index;
+    }
+
+    function updatePlayButton() {
+      $('pauseIcon').classList.toggle('hidden', !state.playing);
+      $('playIcon').classList.toggle('hidden', state.playing);
+      $('playBtn').setAttribute('aria-label', state.playing ? '暫停' : '播放');
+      $('playBtn').title = state.playing ? '暫停 (Space)' : '播放 (Space)';
+    }
+
+    function resetTimer() {
+      clearTimeout(state.timer);
+      state.timer = null;
+      if (state.playing && state.photos.length) {
+        const custom = $('interval').value === 'custom';
+        const input = $('customInterval');
+        const interval = custom
+          ? input.valueAsNumber
+          : Number($('interval').value);
+        if ((!custom || input.checkValidity()) && Number.isFinite(interval) && interval >= 1 && interval <= 86400) {
+          state.timer = setTimeout(showNext, interval * 1000);
+        }
+      }
+    }
+
+    function loadImage(url, timeoutMs = 10000) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        let done = false;
+        const timer = setTimeout(() => finish(false), timeoutMs);
+        function finish(ok) {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          img.onload = img.onerror = null;
+          if (ok) resolve(url);
+          else reject(new Error('圖片載入失敗'));
+        }
+        img.onload = () => finish(true);
+        img.onerror = () => finish(false);
+        img.src = url;
+      });
+    }
+
+    async function findImage(photo) {
+      for (const src of photo.srcs) {
+        try { return await loadImage(src); } catch { /* 下一個尺寸 */ }
+      }
+      throw new Error('此照片的所有尺寸都無法載入');
+    }
+
+    async function displayIndex(index, attempts = 0) {
+      if (index == null || index < 0 || attempts >= state.photos.length) {
+        setStatus('沒有可顯示的圖片，請確認 Flickr 照片權限。', true);
+        return;
+      }
+      const request = ++state.imageToken;
+      const photo = state.photos[index];
+      clearTimeout(state.timer);
+      try {
+        const url = await findImage(photo);
+        if (request !== state.imageToken) return;
+        const nextSlide = 1 - state.activeSlide;
+        const incoming = slides[nextSlide];
+        const outgoing = slides[state.activeSlide];
+        incoming.src = url;
+        incoming.alt = photo.title;
+        incoming.classList.add('active');
+        outgoing.classList.remove('active');
+        state.activeSlide = nextSlide;
+        state.currentIndex = index;
+        $('photoLink').textContent = photo.title;
+        $('photoLink').href = photo.link;
+        $('author').textContent = photo.author + ' · Flickr';
+        $('counter').textContent = `本輪第 ${state.historyAt + 1} 張 · 全庫 ${state.photos.length} 張`;
+        $('photoInfo').classList.remove('hidden');
+        $('empty').classList.add('hidden');
+        setStatus(`全歷史照片 ${state.photos.length} 張 · ${state.playing ? '隨機播放中' : '已暫停'} · 每輪不重複`);
+        resetTimer();
+      } catch {
+        if (request !== state.imageToken) return;
+        if (attempts + 1 >= state.photos.length) {
+          setStatus('照片清單已取得，但所有圖片都無法載入。', true);
+          return;
+        }
+        displayIndex(nextIndex(), attempts + 1);
+      }
+    }
+
+    function showNext() {
+      if (state.photos.length) displayIndex(nextIndex());
+    }
+
+    function showPrevious() {
+      if (!state.photos.length) return;
+      if (state.historyAt <= 0) { resetTimer(); return; }
+      displayIndex(state.history[--state.historyAt]);
+    }
+
+    async function loadPhotos({ quiet = false } = {}) {
+      if (state.loading) return;
+      const apiKey = $('apiKey').value.trim();
+      const rawUser = $('userId').value.trim();
+      if (!apiKey) throw new Error('請先輸入 Flickr API Key。');
+      if (!rawUser) throw new Error('請先輸入 Flickr 帳號。');
+      state.loading = true;
+      const token = ++state.loadToken;
+      const existingId = quiet && state.photos.length && state.currentIndex >= 0
+        ? state.photos[state.currentIndex].id : null;
+      $('loadBtn').disabled = true;
+      if (!quiet) {
+        clearTimeout(state.timer);
+        showProgress(0, 1);
+        setStatus('正在查詢 Flickr 帳號…');
+      }
+      try {
+        const userId = await lookupUserId(apiKey, rawUser);
+        const { photos, remoteTotal } = await fetchEntirePhotoLibrary(apiKey, userId, (done, total, reportedTotal) => {
+          if (!quiet && token === state.loadToken) {
+            showProgress(done, total);
+            setStatus(`讀取完整歷史：第 ${done} / ${total} 頁 · 約 ${remoteTotalText(reportedTotal)} 張照片`);
+          }
+        });
+        if (token !== state.loadToken) return;
+        const unchanged = quiet && state.userId === userId &&
+          photos.length === state.photos.length && photos.every((p, i) => p.id === state.photos[i].id);
+        if (unchanged) return;
+
+        state.userId = userId;
+        state.apiKey = apiKey;
+        resetDeck(photos, quiet ? existingId : null);
+        for (const id of ['prevBtn', 'nextBtn', 'playBtn']) $(id).disabled = false;
+        try {
+          localStorage.setItem('flickr-history-user-id', userId);
+          sessionStorage.setItem('flickr-history-api-key', apiKey); // 只留到分頁關閉
+        } catch { /* 例如 file:// 隱私設定限制 */ }
+        if (state.currentIndex >= 0 && existingId) {
+          resetTimer();
+        } else {
+          state.playing = true;
+          updatePlayButton();
+          showNext();
+        }
+        state.firstLoadCompleted = true;
+        if (quiet) setStatus(`完整清單已更新：${photos.length} 張公開照片`);
+      } catch (err) {
+        if (token !== state.loadToken) return;
+        setStatus(err.message || '讀取失敗', true);
+        if (!state.photos.length) showEmpty('無法讀取完整照片清單', err.message || '請檢查 API Key 與 Flickr 帳號');
+        else resetTimer();
+      } finally {
+        if (token === state.loadToken) {
+          state.loading = false;
+          $('loadBtn').disabled = false;
+          hideProgress();
+        }
+      }
+    }
+
+    function remoteTotalText(n) { return n ? n.toLocaleString('zh-TW') : '未知數量'; }
+
+    $('loadForm').addEventListener('submit', e => {
+      e.preventDefault();
+      loadPhotos().catch(err => setStatus(err.message, true));
+    });
+    $('prevBtn').addEventListener('click', showPrevious);
+    $('nextBtn').addEventListener('click', showNext);
+    $('playBtn').addEventListener('click', () => {
+      if (!state.photos.length) return;
+      state.playing = !state.playing;
+      updatePlayButton();
+      resetTimer();
+      setStatus(state.playing ? '已繼續隨機輪播' : '已暫停輪播');
+    });
+    $('interval').addEventListener('change', () => {
+      const custom = $('interval').value === 'custom';
+      $('customIntervalLabel').classList.toggle('hidden', !custom);
+      $('customInterval').classList.toggle('hidden', !custom);
+      $('customInterval').disabled = !custom;
+      $('customInterval').required = custom;
+      if (custom) $('customInterval').focus();
+      resetTimer();
+    });
+    $('customInterval').addEventListener('change', () => {
+      const input = $('customInterval');
+      if (!Number.isFinite(input.valueAsNumber) || !input.checkValidity()) {
+        input.reportValidity();
+        return;
+      }
+      resetTimer();
+    });
+
+    const stage = $('stage');
+    let controlsTimer = null;
+    let lastPointerMove = 0;
+    const CONTROLS_HIDE_DELAY_MS = 2600;
+
+    function revealFullscreenControls() {
+      if (document.fullscreenElement !== stage) return;
+      stage.classList.add('controls-visible');
+      clearTimeout(controlsTimer);
+      controlsTimer = setTimeout(() => {
+        // If a control is keyboard-focused, keep it visible and accessible.
+        if (!stage.contains(document.activeElement) ||
+            !document.activeElement.matches('button:focus-visible, a:focus-visible')) {
+          stage.classList.remove('controls-visible');
+        }
+      }, CONTROLS_HIDE_DELAY_MS);
+    }
+
+    function updateFitButton() {
+      const fill = stage.classList.contains('fill-cover');
+      $('fitBtn').setAttribute('aria-pressed', String(fill));
+      $('fitBtn').setAttribute('aria-label', fill ? '改為完整顯示照片' : '改為填滿畫面');
+      $('fitBtn').title = fill ? '完整顯示：保留整張照片 (C)' : '填滿畫面：照片可能裁切 (C)';
+    }
+
+    function toggleFit() {
+      stage.classList.toggle('fill-cover');
+      updateFitButton();
+      revealFullscreenControls();
+    }
+
+    $('fitBtn').addEventListener('click', toggleFit);
+    $('fullscreenBtn').addEventListener('click', async () => {
+      try {
+        // Fullscreen only the stage, not the entire application (toolbar and footer).
+        if (document.fullscreenElement === stage) await document.exitFullscreen();
+        else if (!document.fullscreenElement) await stage.requestFullscreen();
+      } catch {
+        setStatus('瀏覽器不允許全螢幕。請使用 Chrome / Edge 並按下全螢幕按鈕。', true);
+      }
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      const active = document.fullscreenElement === stage;
+      $('fullscreenBtn').setAttribute('aria-label', active ? '離開全螢幕' : '進入全螢幕');
+      $('fullscreenBtn').title = active ? '離開全螢幕 (Esc / F)' : '進入真正全螢幕 (F)';
+      if (active) {
+        stage.classList.remove('fill-cover');
+        updateFitButton();
+        stage.focus({ preventScroll: true });
+        revealFullscreenControls();
+      }
+      else {
+        clearTimeout(controlsTimer);
+        stage.classList.remove('controls-visible');
+      }
+    });
+
+    stage.addEventListener('pointermove', () => {
+      if (document.fullscreenElement !== stage) return;
+      const now = Date.now();
+      if (now - lastPointerMove > 90) {
+        lastPointerMove = now;
+        revealFullscreenControls();
+      }
+    });
+    // Touch devices can tap the picture to show hidden controls.
+    stage.addEventListener('pointerdown', e => {
+      if (document.fullscreenElement === stage && !e.target.closest('button, a')) revealFullscreenControls();
+    });
+    stage.addEventListener('focusin', revealFullscreenControls);
+
+    document.addEventListener('keydown', e => {
+      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); showNext(); revealFullscreenControls(); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); showPrevious(); revealFullscreenControls(); }
+      if (e.key === ' ') { e.preventDefault(); $('playBtn').click(); revealFullscreenControls(); }
+      if (e.key.toLowerCase() === 'f') { e.preventDefault(); $('fullscreenBtn').click(); }
+      if (e.key.toLowerCase() === 'c' && document.fullscreenElement === stage) {
+        e.preventDefault(); toggleFit();
+      }
+    });
+
+    // 避免頻繁觸發大量 API 請求；每六小時重新同步全庫。
+    setInterval(() => {
+      if (!state.userId || state.loading || document.hidden) return;
+      $('userId').value = state.userId;
+      loadPhotos({ quiet: true }).catch(() => {});
+    }, REFRESH_EVERY_MS);
+
+    // 啟動順序：網址 ?id= > 程式預設值 > 上次使用的帳號。
+    const params = new URLSearchParams(location.search);
+    let rememberedId = '';
+    let rememberedKey = '';
+    try {
+      rememberedId = localStorage.getItem('flickr-history-user-id') || '';
+      rememberedKey = sessionStorage.getItem('flickr-history-api-key') || '';
+    } catch { /* ignore */ }
+    $('userId').value = params.get('id') || DEFAULT_FLICKR_USER_ID || rememberedId;
+    $('apiKey').value = DEFAULT_FLICKR_API_KEY || rememberedKey;
+    updatePlayButton();
+    if ($('userId').value && $('apiKey').value) loadPhotos().catch(err => setStatus(err.message, true));
+  </script>
+</body>
+</html>

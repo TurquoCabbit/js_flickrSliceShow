@@ -247,12 +247,12 @@
 
     // JSONP 使用 Flickr 官方 API 網域，可從 file:// 的單檔 HTML 開啟。
     // JSONP 會執行 Flickr 返回的 JS，因此請求目標固定為 HTTPS API 官方網址。
-    function flickrRequest(apiKey, method, args = {}) {
+    function flickrRequest(apiKey, method, args = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
       return new Promise((resolve, reject) => {
         const callback = '__flickr_history_cb_' + (++callbackCounter);
         const script = document.createElement('script');
         let finished = false;
-        const timeout = setTimeout(() => finish(new Error('Flickr API 請求逾時。')), REQUEST_TIMEOUT_MS);
+        const timeout = setTimeout(() => finish(new Error('Flickr API 請求逾時。')), timeoutMs);
 
         function finish(err, result) {
           if (finished) return;
@@ -328,7 +328,8 @@
     function convertPhoto(photo, userId) {
       if (!photo || !/^\d+$/.test(String(photo.id || '')) || photo.media === 'video') return null;
       if (String(photo.ispublic) === '0') return null;
-      const urls = [photo.url_l, photo.url_c, photo.url_z, photo.url_m];
+      // getSizes 失敗時仍有多種 Flickr 正式圖片 URL 可用。
+      const urls = [photo.url_o, photo.url_k, photo.url_h, photo.url_l, photo.url_c, photo.url_z, photo.url_m];
       const server = String(photo.server || '');
       const secret = String(photo.secret || '');
       if (/^[a-zA-Z0-9]+$/.test(server) && /^[a-zA-Z0-9]+$/.test(secret)) {
@@ -352,7 +353,7 @@
     async function fetchEntirePhotoLibrary(apiKey, userId, onProgress) {
       const common = {
         user_id: userId, per_page: String(PAGE_SIZE),
-        extras: 'url_l,url_c,url_z,url_m,media,owner_name',
+        extras: 'url_o,url_k,url_h,url_l,url_c,url_z,url_m,media,owner_name',
         safe_search: '1'
       };
       const first = await flickrRequestWithRetry(apiKey, 'flickr.people.getPublicPhotos', {
@@ -457,7 +458,61 @@
       }
     }
 
-    function loadImage(url, timeoutMs = 10000) {
+    // 選圖始終以全螢幕為基準：視窗模式先用螢幕尺寸預選，不受瀏覽器視窗大小限制。
+    // screen.width/height 是 CSS pixels；乘 DPR 後才是實際顯示像素。
+    function fullscreenTargetPixels() {
+      const full = document.fullscreenElement === $('stage');
+      const width = full ? $('stage').clientWidth : (screen.width || window.innerWidth);
+      const height = full ? $('stage').clientHeight : (screen.height || window.innerHeight);
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      return {
+        width: Math.max(1, Math.ceil(width * dpr)),
+        height: Math.max(1, Math.ceil(height * dpr))
+      };
+    }
+
+    // 根據 object-fit: contain/cover 及照片長寬比，計算實際顯示的照片像素。
+    function requiredImagePixels(aspectRatio) {
+      const target = fullscreenTargetPixels();
+      const cover = document.fullscreenElement === $('stage') && $('stage').classList.contains('fill-cover');
+      const scaleHeight = cover
+        ? Math.max(target.height, target.width / aspectRatio)
+        : Math.min(target.height, target.width / aspectRatio);
+      return { width: scaleHeight * aspectRatio, height: scaleHeight };
+    }
+
+    // 僅在即將播放時查詢照片尺寸；快取 Promise 以避免重複呼叫 API。
+    // 高於 1600px 的 Flickr 圖片通常有各自的 secret，不能自行改 URL 尾碼。
+    function getPhotoSizes(photo) {
+      if (!photo.sizesPromise) {
+        photo.sizesPromise = flickrRequest(state.apiKey, 'flickr.photos.getSizes', {
+          photo_id: photo.id
+        }, 8000).then(result => {
+          if (!Array.isArray(result.sizes?.size)) throw new Error('Flickr getSizes 回傳格式不正確');
+          return result.sizes.size.map(size => ({
+            url: String(size.source || ''),
+            width: Number(size.width),
+            height: Number(size.height),
+            label: String(size.label || '')
+          })).filter(size =>
+            validImageUrl(size.url) && size.width > 0 && size.height > 0 &&
+            Number.isFinite(size.width) && Number.isFinite(size.height) &&
+            !/square/i.test(size.label)
+          ).sort((a, b) => a.width * a.height - b.width * b.height);
+        }).catch(err => {
+          console.warn('Flickr getSizes 查詢失敗，改用清單內的尺寸：', photo.id, err);
+          return [];
+        });
+      }
+      return photo.sizesPromise;
+    }
+
+    function resolutionStatus(photo, image) {
+      const target = fullscreenTargetPixels();
+      return `全歷史照片 ${state.photos.length} 張 · ${state.playing ? '隨機播放中' : '已暫停'} · 圖片 ${image.width}×${image.height}px / 全螢幕 ${target.width}×${target.height}px`;
+    }
+
+    function loadImage(url, timeoutMs = 15000) {
       return new Promise((resolve, reject) => {
         const img = new Image();
         let done = false;
@@ -467,7 +522,7 @@
           done = true;
           clearTimeout(timer);
           img.onload = img.onerror = null;
-          if (ok) resolve(url);
+          if (ok) resolve({ url, width: img.naturalWidth, height: img.naturalHeight });
           else reject(new Error('圖片載入失敗'));
         }
         img.onload = () => finish(true);
@@ -477,10 +532,43 @@
     }
 
     async function findImage(photo) {
-      for (const src of photo.srcs) {
+      const sizes = await getPhotoSizes(photo);
+      let candidates = [];
+      if (sizes.length) {
+        // 選擇足以覆蓋全螢幕照片顯示像素的最小版本，兼顧清晰度及流量。
+        const largest = sizes[sizes.length - 1];
+        const required = requiredImagePixels(largest.width / largest.height);
+        const selected = sizes.findIndex(size =>
+          size.width >= required.width && size.height >= required.height);
+        const index = selected === -1 ? sizes.length - 1 : selected;
+        // 首選尺寸失敗則先試更大版本，再往較小版本降級。
+        candidates = [
+          ...sizes.slice(index).map(size => size.url),
+          ...sizes.slice(0, index).reverse().map(size => size.url)
+        ];
+      }
+      candidates.push(...photo.srcs);
+      for (const src of new Set(candidates)) {
         try { return await loadImage(src); } catch { /* 下一個尺寸 */ }
       }
       throw new Error('此照片的所有尺寸都無法載入');
+    }
+
+    // 進出全螢幕、切換裁切模式及螢幕尺寸變化時，維持當前照片及輪播計時。
+    let resolutionUpdateToken = 0;
+    async function refreshCurrentImageResolution() {
+      const update = ++resolutionUpdateToken;
+      const index = state.currentIndex;
+      if (index < 0 || index >= state.photos.length) return;
+      const request = state.imageToken;
+      const slide = slides[state.activeSlide];
+      try {
+        const image = await findImage(state.photos[index]);
+        if (update !== resolutionUpdateToken || request !== state.imageToken ||
+            index !== state.currentIndex || slide !== slides[state.activeSlide]) return;
+        if (slide.src !== image.url) slide.src = image.url;
+        setStatus(resolutionStatus(state.photos[index], image));
+      } catch { /* 保留已顯示照片 */ }
     }
 
     async function displayIndex(index, attempts = 0) {
@@ -492,12 +580,13 @@
       const photo = state.photos[index];
       clearTimeout(state.timer);
       try {
-        const url = await findImage(photo);
+        const selectedTarget = JSON.stringify(fullscreenTargetPixels()) + ':' + $('stage').classList.contains('fill-cover');
+        const image = await findImage(photo);
         if (request !== state.imageToken) return;
         const nextSlide = 1 - state.activeSlide;
         const incoming = slides[nextSlide];
         const outgoing = slides[state.activeSlide];
-        incoming.src = url;
+        incoming.src = image.url;
         incoming.alt = photo.title;
         incoming.classList.add('active');
         outgoing.classList.remove('active');
@@ -509,8 +598,11 @@
         $('counter').textContent = `本輪第 ${state.historyAt + 1} 張 · 全庫 ${state.photos.length} 張`;
         $('photoInfo').classList.remove('hidden');
         $('empty').classList.add('hidden');
-        setStatus(`全歷史照片 ${state.photos.length} 張 · ${state.playing ? '隨機播放中' : '已暫停'} · 每輪不重複`);
+        setStatus(resolutionStatus(photo, image));
         resetTimer();
+        // 如果正好在載入期間切進全螢幕，補選符合新尺寸的圖片。
+        const currentTarget = JSON.stringify(fullscreenTargetPixels()) + ':' + $('stage').classList.contains('fill-cover');
+        if (selectedTarget !== currentTarget) refreshCurrentImageResolution();
       } catch {
         if (request !== state.imageToken) return;
         if (attempts + 1 >= state.photos.length) {
@@ -653,6 +745,7 @@
       stage.classList.toggle('fill-cover');
       updateFitButton();
       revealFullscreenControls();
+      refreshCurrentImageResolution();
     }
 
     $('fitBtn').addEventListener('click', toggleFit);
@@ -680,6 +773,14 @@
         clearTimeout(controlsTimer);
         stage.classList.remove('controls-visible');
       }
+      // requestFullscreen 完成後元素尺寸才會更新。
+      requestAnimationFrame(refreshCurrentImageResolution);
+    });
+
+    let resolutionResizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(resolutionResizeTimer);
+      resolutionResizeTimer = setTimeout(refreshCurrentImageResolution, 250);
     });
 
     stage.addEventListener('pointermove', () => {
